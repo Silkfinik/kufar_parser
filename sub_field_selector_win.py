@@ -4,12 +4,9 @@ import json
 
 
 class SubFieldSelectorWindow(ctk.CTkToplevel):
-    """
-    Окно для выбора вложенных полей с функцией предпросмотра и прокруткой колесиком.
-    """
-
-    def __init__(self, parent, sub_fields_data, previous_config):
+    def __init__(self, parent, data_to_unpack, previous_config, unpack_type):
         super().__init__(parent)
+        self.parent = parent  # Сохраняем родителя
         self.transient(parent)
         self.title("Настройка вложенных полей")
         self.geometry("600x600")
@@ -19,6 +16,7 @@ class SubFieldSelectorWindow(ctk.CTkToplevel):
         self.widgets = []
         self.result_config = previous_config
 
+        # ИСПРАВЛЕНИЕ: Создаем и сразу присваиваем self.scrollable_frame
         self.scrollable_frame = ctk.CTkScrollableFrame(
             self, label_text="Параметр -> Имя столбца")
         self.scrollable_frame.grid(
@@ -27,26 +25,34 @@ class SubFieldSelectorWindow(ctk.CTkToplevel):
 
         is_first_open = not previous_config
 
-        for i, item in enumerate(sub_fields_data):
-            field_name = item.get("pl")
+        items_to_show = []
+        if unpack_type == 'list_of_dicts':
+            items_to_show = data_to_unpack
+        elif unpack_type == 'dict':
+            items_to_show = [{'pl': key, 'v': value}
+                             for key, value in data_to_unpack.items()]
+
+        for i, item in enumerate(items_to_show):
+            field_name = str(item.get("pl"))
             if not field_name:
                 continue
 
+            # ИСПРАВЛЕНИЕ: Используем self.scrollable_frame
             checkbox = ctk.CTkCheckBox(
                 self.scrollable_frame, text=field_name, width=200)
             checkbox.grid(row=i, column=0, padx=10, pady=8, sticky="w")
-
             if is_first_open or field_name in self.result_config:
                 checkbox.select()
 
             entry = ctk.CTkEntry(self.scrollable_frame)
             entry.grid(row=i, column=1, padx=5, pady=8, sticky="ew")
-            entry.insert(0, self.result_config.get(field_name, field_name))
+
+            default_name = f"{self.parent.last_clicked_key}_{field_name}" if unpack_type == 'dict' else field_name
+            entry.insert(0, self.result_config.get(field_name, default_name))
 
             preview_button = ctk.CTkButton(
                 self.scrollable_frame, text="...", width=40, command=lambda v=item: self.show_preview(v))
             preview_button.grid(row=i, column=2, padx=10, pady=8, sticky="e")
-
             self.widgets.append(
                 {'checkbox': checkbox, 'entry': entry, 'original_name': field_name})
 
@@ -63,23 +69,21 @@ class SubFieldSelectorWindow(ctk.CTkToplevel):
         confirm_button.grid(row=2, column=0, columnspan=2,
                             padx=10, pady=10, sticky="ew")
 
-        # --- НОВЫЙ КОД: Активируем прокрутку ---
+        # Теперь эта строка будет работать без ошибок
         self.bind_mouse_scroll(self.scrollable_frame)
         for child in self.scrollable_frame.winfo_children():
             self.bind_mouse_scroll(child)
 
     def on_mouse_wheel(self, event):
-        """Обрабатывает событие прокрутки колесика мыши."""
-        if event.num == 4:  # Linux: scroll up
+        if event.num == 4:
             self.scrollable_frame._parent_canvas.yview_scroll(-1, "units")
-        elif event.num == 5:  # Linux: scroll down
+        elif event.num == 5:
             self.scrollable_frame._parent_canvas.yview_scroll(1, "units")
-        else:  # Windows/macOS
+        else:
             self.scrollable_frame._parent_canvas.yview_scroll(
                 int(-1 * (event.delta / 120)), "units")
 
     def bind_mouse_scroll(self, widget):
-        """Привязывает событие прокрутки к виджету и всем его дочерним элементам."""
         widget.bind("<MouseWheel>", self.on_mouse_wheel, add="+")
         widget.bind("<Button-4>", self.on_mouse_wheel, add="+")
         widget.bind("<Button-5>", self.on_mouse_wheel, add="+")
@@ -91,10 +95,8 @@ class SubFieldSelectorWindow(ctk.CTkToplevel):
         self.preview_textbox.configure(state="normal")
         self.preview_textbox.delete("0.0", "end")
         key = item.get("pl", "N/A")
-        value_vl = item.get("vl")
-        value_v = item.get("v")
-        display_value = value_vl if value_vl not in [None, "", []] else value_v
-        preview_text = f"Поле: '{key}'\nЗначение: {json.dumps(display_value, ensure_ascii=False, indent=2)}"
+        value = item.get("v")
+        preview_text = f"Поле: '{key}'\nЗначение: {json.dumps(value, ensure_ascii=False, indent=2)}"
         self.preview_textbox.insert("0.0", preview_text)
         self.preview_textbox.configure(state="disabled")
 

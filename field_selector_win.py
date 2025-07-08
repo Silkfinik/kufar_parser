@@ -18,6 +18,7 @@ class FieldSelectorWindow(ctk.CTkToplevel):
         self.max_pages = max_pages
         self.widgets = []
         self.unpacked_fields_config = {}
+        self.last_clicked_key = None  # <-- Добавляем этот атрибут
 
         self.scrollable_frame = ctk.CTkScrollableFrame(
             self, label_text="Поле -> Имя столбца")
@@ -39,9 +40,12 @@ class FieldSelectorWindow(ctk.CTkToplevel):
                 self.scrollable_frame, fg_color="transparent")
             button_frame.grid(row=i, column=2, padx=5, pady=8, sticky="e")
 
-            is_unpackable = isinstance(value, list) and len(
-                value) > 0 and isinstance(value[0], dict) and 'pl' in value[0]
-            if is_unpackable:
+            # Определяем, можно ли поле распаковать
+            is_dict = isinstance(value, dict)
+            is_list_of_dicts = isinstance(value, list) and len(
+                value) > 0 and isinstance(value[0], dict)
+
+            if is_dict or is_list_of_dicts:
                 unpack_button = ctk.CTkButton(button_frame, text="Распаковать...", width=100,
                                               command=lambda k=key, v=value: self.open_sub_field_selector(k, v))
                 unpack_button.pack(side="left")
@@ -49,17 +53,16 @@ class FieldSelectorWindow(ctk.CTkToplevel):
             preview_button = ctk.CTkButton(
                 button_frame, text="...", width=40, command=lambda k=key, v=value: self.show_preview(k, v))
             preview_button.pack(side="left", padx=(5, 0))
-
             self.widgets.append(
                 {'checkbox': checkbox, 'entry': entry, 'original_name': key})
 
+        # ... (остальная часть __init__ и другие функции до open_sub_field_selector без изменений)
         self.preview_textbox = ctk.CTkTextbox(self, height=150)
         self.preview_textbox.grid(
             row=1, column=0, columnspan=2, padx=10, pady=10, sticky="ew")
         self.preview_textbox.insert(
             "0.0", "Нажмите '...' или 'Распаковать'...")
         self.preview_textbox.configure(state="disabled")
-
         pages_frame = ctk.CTkFrame(self)
         pages_frame.grid(row=2, column=0, columnspan=2,
                          padx=10, pady=5, sticky="ew")
@@ -69,42 +72,64 @@ class FieldSelectorWindow(ctk.CTkToplevel):
         self.pages_entry = ctk.CTkEntry(pages_frame, width=80)
         self.pages_entry.pack(side="left", padx=15, pady=10)
         self.pages_entry.insert(0, str(self.max_pages))
-
         confirm_button = ctk.CTkButton(
             self, text="Подтвердить и запустить парсинг", command=self.confirm_selection, height=40)
         confirm_button.grid(row=3, column=0, columnspan=2,
                             padx=10, pady=10, sticky="ew")
-
-        # --- НОВЫЙ КОД: Активируем прокрутку ---
         self.bind_mouse_scroll(self.scrollable_frame)
         for child in self.scrollable_frame.winfo_children():
             self.bind_mouse_scroll(child)
 
+    def open_sub_field_selector(self, key, value):
+        self.last_clicked_key = key  # Запоминаем ключ, по которому кликнули
+        previous_config = self.unpacked_fields_config.get(
+            key, {}).get('sub_field_map', {})
+
+        unpack_type = None
+        if isinstance(value, dict):
+            unpack_type = 'dict'
+        elif isinstance(value, list) and len(value) > 0 and isinstance(value[0], dict):
+            unpack_type = 'list_of_dicts'
+
+        if not unpack_type:
+            self.show_preview(key, "Этот тип поля нельзя распаковать.")
+            return
+
+        sub_window = SubFieldSelectorWindow(
+            self, value, previous_config, unpack_type)
+        self.wait_window(sub_window)
+
+        if hasattr(sub_window, 'result_config') and sub_window.result_config:
+            self.unpacked_fields_config[key] = {
+                "type": unpack_type,
+                "sub_field_map": sub_window.result_config,
+                "source_key": "pl",  # Для list_of_dicts
+                "value_key": "v"    # Для list_of_dicts
+            }
+            self.show_preview(key, {"Распаковано полей": list(
+                sub_window.result_config.values())})
+            self.parent_app.log_status(
+                f"⚙️ Для поля '{key}' настроена распаковка {len(sub_window.result_config)} вложенных полей.")
+
+    # ... (остальные функции без изменений) ...
     def on_mouse_wheel(self, event):
-        """Обрабатывает событие прокрутки колесика мыши."""
-        if event.num == 4:  # Linux: scroll up
+        if event.num == 4:
             self.scrollable_frame._parent_canvas.yview_scroll(-1, "units")
-        elif event.num == 5:  # Linux: scroll down
+        elif event.num == 5:
             self.scrollable_frame._parent_canvas.yview_scroll(1, "units")
-        else:  # Windows/macOS
-            # event.delta имеет значение 120 для одного "шага" прокрутки вверх
+        else:
             self.scrollable_frame._parent_canvas.yview_scroll(
                 int(-1 * (event.delta / 120)), "units")
 
     def bind_mouse_scroll(self, widget):
-        """Привязывает событие прокрутки к виджету и всем его дочерним элементам."""
         widget.bind("<MouseWheel>", self.on_mouse_wheel, add="+")
         widget.bind("<Button-4>", self.on_mouse_wheel, add="+")
         widget.bind("<Button-5>", self.on_mouse_wheel, add="+")
-        # Привязываем также ко всем вложенным виджетам, чтобы скролл работал везде
-        for child in widget.winfo_children():
-            # Некоторые виджеты (как кнопки в кнопке) могут не иметь этого метода
-            if hasattr(child, 'winfo_children'):
+        if hasattr(widget, 'winfo_children'):
+            for child in widget.winfo_children():
                 self.bind_mouse_scroll(child)
 
-    # --- Остальные функции остаются без изменений ---
     def confirm_selection(self):
-        # ... (без изменений) ...
         field_config = {
             "field_map": {w['original_name']: w['entry'].get() for w in self.widgets if w['checkbox'].get() == 1 and w['entry'].get()},
             "unpacked_fields": self.unpacked_fields_config
@@ -121,25 +146,7 @@ class FieldSelectorWindow(ctk.CTkToplevel):
         }
         self.destroy()
 
-    def open_sub_field_selector(self, key, value):
-        # ... (без изменений) ...
-        previous_config = self.unpacked_fields_config.get(
-            key, {}).get('sub_field_map', {})
-        sub_window = SubFieldSelectorWindow(self, value, previous_config)
-        self.wait_window(sub_window)
-        if hasattr(sub_window, 'result_config') and sub_window.result_config:
-            self.unpacked_fields_config[key] = {
-                "sub_field_map": sub_window.result_config,
-                "source_key": "pl",
-                "value_key": "v"
-            }
-            self.show_preview(key, {"Распаковано полей": list(
-                sub_window.result_config.values())})
-            self.parent_app.log_status(
-                f"⚙️ Для поля '{key}' настроена распаковка {len(sub_window.result_config)} вложенных полей.")
-
     def show_preview(self, key, value):
-        # ... (без изменений) ...
         self.preview_textbox.configure(state="normal")
         self.preview_textbox.delete("0.0", "end")
         preview_text = f"--- Предпросмотр поля: '{key}' ---\n\n"
