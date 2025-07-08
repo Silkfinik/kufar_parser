@@ -10,12 +10,45 @@ from scraper import get_page_data
 # --- НОВЫЙ ИМПОРТ ---
 from field_selector_win import FieldSelectorWindow
 
+# --- ВАЖНО: НОВАЯ ФУНКЦИЯ ДЛЯ ОБРАБОТКИ ДАННЫХ ---
+
+
+def flatten_apartment_data(apartment_list, selection_config):
+    """
+    Преобразует список объявлений в плоскую структуру согласно конфигурации выбора полей.
+    """
+    if not selection_config:
+        return apartment_list
+
+    processed_list = []
+
+    top_level_fields = selection_config.get("top_level_fields", [])
+    unpack_config = selection_config.get("unpacked_fields", {})
+
+    for ad in apartment_list:
+        # 1. Собираем поля верхнего уровня
+        flat_ad = {key: ad.get(key) for key in top_level_fields}
+
+        # 2. Распаковываем сложные поля
+        for field_to_unpack, config in unpack_config.items():
+            if field_to_unpack in ad:
+                # Создаем временный словарь для быстрого доступа: {'Имя параметра': 'Значение'}
+                param_lookup = {str(item.get(config["source_key"])): item.get(config["value_key"])
+                                for item in ad[field_to_unpack] if config["source_key"] in item}
+
+                # Добавляем выбранные вложенные поля в нашу плоскую структуру
+                for sub_field in config["selected_sub_fields"]:
+                    flat_ad[sub_field] = param_lookup.get(sub_field)
+
+        processed_list.append(flat_ad)
+
+    return processed_list
+
 # --- Основной класс приложения ---
 
 
 class App(ctk.CTk):
-    # ... (весь код __init__ и других функций остается без изменений до prompt_for_page_count) ...
-    # ... (я пропущу дублирование для краткости)
+    # ... (весь код до prompt_user_for_next_steps без изменений)
     def __init__(self):
         super().__init__()
         # ... (вся ваша предыдущая настройка виджетов)
@@ -123,27 +156,18 @@ class App(ctk.CTk):
             f"📊 Анализ завершен. Всего найдено {total_ads} объявлений (~{self.max_pages} страниц).")
         self.after(0, self.prompt_user_for_next_steps)
 
-    ### --- ОБНОВЛЕННАЯ ЛОГИКА --- ###
     def prompt_user_for_next_steps(self):
-        """
-        Показывает окна выбора полей и выбора количества страниц, затем запускает основной парсер.
-        """
-        # --- ШАГ 2.1: Выбор полей для экспорта ---
-        self.log_status(
-            "Пожалуйста, выберите поля для экспорта в появившемся окне...")
         sample_ad = self.first_page_data['apartments'][0]
         selector_window = FieldSelectorWindow(self, sample_ad)
-        # Ждем, пока пользователь закроет окно выбора полей
         self.wait_window(selector_window)
 
-        selected_fields = selector_window.selected_fields
-        if selected_fields is None:  # Пользователь закрыл окно крестиком
+        selection_config = selector_window.selection_result
+        if selection_config is None:
             self.log_status("🛑 Операция отменена. Выбор полей не сделан.")
             self.set_ui_state(is_running=False)
             return
-        self.log_status(f"Выбрано полей для экспорта: {len(selected_fields)}.")
 
-        # --- ШАГ 2.2: Выбор количества страниц ---
+        # ... (остальная часть функции с диалогом о страницах без изменений)
         pages_to_scrape = self.max_pages
         if self.ask_pages_switch.get() is True:
             dialog = ctk.CTkInputDialog(
@@ -161,24 +185,20 @@ class App(ctk.CTk):
 
         self.log_status(f"⚙️ Принято к обработке: {pages_to_scrape} страниц.")
 
-        # --- ШАГ 2.3: Запуск основного сбора ---
         main_thread = threading.Thread(
-            target=self.main_scraping_worker, args=(pages_to_scrape, selected_fields))
+            target=self.main_scraping_worker, args=(pages_to_scrape, selection_config))
         main_thread.start()
 
-    def main_scraping_worker(self, pages_to_scrape, selected_fields):
-        # ... (Эта функция теперь принимает 'selected_fields')
+    def main_scraping_worker(self, pages_to_scrape, selection_config):
+        # ... (логика сбора данных)
         all_found_apartments = self.first_page_data['apartments']
         next_token = self.first_page_data.get('next_page_token')
         current_url = self.base_url
         delay = float(self.delay_entry.get() or "1")
-
         self.log_status(
             f"✅ Найдено {len(all_found_apartments)} объявлений на странице №1.")
-
         if pages_to_scrape > 1:
             for page_num in range(2, pages_to_scrape + 1):
-                # ... (логика цикла остается прежней) ...
                 if not next_token:
                     self.log_status("🏁 Больше страниц нет.")
                     break
@@ -197,44 +217,45 @@ class App(ctk.CTk):
                     f"✅ Найдено {len(page_data['apartments'])} объявлений. Всего собрано: {len(all_found_apartments)}")
                 next_token = page_data.get('next_page_token')
 
-        # --- Передаем selected_fields в функцию сохранения ---
-        file_format = self.format_segmented_button.get().lower()
-        filename = f"kufar_ads_{int(time.time())}"
+        # --- ОБРАБАТЫВАЕМ И СОХРАНЯЕМ ---
         self.log_status(
             f"\n🎉 Сбор завершен! Всего найдено {len(all_found_apartments)} объявлений.")
-        self.save_results(all_found_apartments, file_format,
-                          filename, selected_fields)
+        self.log_status(
+            "Обрабатываю и 'расплющиваю' данные перед сохранением...")
+
+        flat_data = flatten_apartment_data(
+            all_found_apartments, selection_config)
+
+        file_format = self.format_segmented_button.get().lower()
+        filename = f"kufar_ads_{int(time.time())}"
+        self.save_results(flat_data, file_format, filename)
         self.set_ui_state(is_running=False)
 
-    def save_results(self, apartments, file_format, filename, selected_fields):
-        # --- Функция сохранения теперь использует selected_fields ---
-        if not apartments:
+    def save_results(self, flat_apartments, file_format, filename):
+        # --- Функция сохранения теперь работает с плоскими данными ---
+        if not flat_apartments:
             return
         full_filename = f"{filename}.{file_format}"
         self.log_status(f"💾 Сохраняю данные в {full_filename}...")
 
-        # --- Фильтруем данные перед сохранением ---
-        filtered_apartments = []
-        for ad in apartments:
-            filtered_ad = {key: ad.get(key) for key in selected_fields}
-            filtered_apartments.append(filtered_ad)
-
         try:
+            # Заголовки теперь всегда правильные
+            headers = flat_apartments[0].keys()
             if file_format == "csv":
+                # Данные уже плоские, но могут содержать списки/словари (например, в 'vl' метро)
                 processed_for_csv = []
-                for ad in filtered_apartments:
+                for ad in flat_apartments:
                     processed_ad = {k: json.dumps(v, ensure_ascii=False) if isinstance(
                         v, (dict, list)) else v for k, v in ad.items()}
                     processed_for_csv.append(processed_ad)
 
                 with open(full_filename, 'w', newline='', encoding='utf-8') as f:
-                    writer = csv.DictWriter(f, fieldnames=selected_fields)
+                    writer = csv.DictWriter(f, fieldnames=headers)
                     writer.writeheader()
                     writer.writerows(processed_for_csv)
             elif file_format == "json":
                 with open(full_filename, 'w', encoding='utf-8') as f:
-                    json.dump(filtered_apartments, f,
-                              ensure_ascii=False, indent=4)
+                    json.dump(flat_apartments, f, ensure_ascii=False, indent=4)
             self.log_status(f"✅ Файл успешно сохранен!")
         except Exception as e:
             self.log_status(f"❌ Ошибка сохранения: {e}")
