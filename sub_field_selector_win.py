@@ -1,4 +1,3 @@
-# sub_field_selector_win.py
 import customtkinter as ctk
 import json
 
@@ -6,7 +5,7 @@ import json
 class SubFieldSelectorWindow(ctk.CTkToplevel):
     def __init__(self, parent, data_to_unpack, previous_config, unpack_type):
         super().__init__(parent)
-        self.parent = parent  # Сохраняем родителя
+        self.parent = parent
         self.transient(parent)
         self.title("Настройка вложенных полей")
         self.geometry("600x600")
@@ -16,7 +15,6 @@ class SubFieldSelectorWindow(ctk.CTkToplevel):
         self.widgets = []
         self.result_config = previous_config
 
-        # ИСПРАВЛЕНИЕ: Создаем и сразу присваиваем self.scrollable_frame
         self.scrollable_frame = ctk.CTkScrollableFrame(
             self, label_text="Параметр -> Имя столбца")
         self.scrollable_frame.grid(
@@ -37,7 +35,6 @@ class SubFieldSelectorWindow(ctk.CTkToplevel):
             if not field_name:
                 continue
 
-            # ИСПРАВЛЕНИЕ: Используем self.scrollable_frame
             checkbox = ctk.CTkCheckBox(
                 self.scrollable_frame, text=field_name, width=200)
             checkbox.grid(row=i, column=0, padx=10, pady=8, sticky="w")
@@ -69,7 +66,6 @@ class SubFieldSelectorWindow(ctk.CTkToplevel):
         confirm_button.grid(row=2, column=0, columnspan=2,
                             padx=10, pady=10, sticky="ew")
 
-        # Теперь эта строка будет работать без ошибок
         self.bind_mouse_scroll(self.scrollable_frame)
         for child in self.scrollable_frame.winfo_children():
             self.bind_mouse_scroll(child)

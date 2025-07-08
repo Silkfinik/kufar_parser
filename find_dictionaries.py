@@ -14,14 +14,10 @@ def find_list_by_fingerprint(data, path=""):
     """
     Универсальный рекурсивный поиск списка, похожего на список фильтров/словарей.
     """
-    # Мы ищем СПИСОК, который не пустой
     if isinstance(data, list) and len(data) > 0:
         first_item = data[0]
-        # Элементы списка должны быть СЛОВАРЯМИ
         if isinstance(first_item, dict):
 
-            # ОТПЕЧАТОК: Словарь должен содержать ключи, описывающие фильтр.
-            # Проверяем на самые частые комбинации.
             keys = first_item.keys()
             if ('label' in keys and 'values' in keys) or \
                ('label' in keys and 'options' in keys) or \
@@ -32,7 +28,6 @@ def find_list_by_fingerprint(data, path=""):
                 print(
                     f"   Пример первого элемента: {json.dumps(first_item, ensure_ascii=False, indent=2)}")
 
-    # Рекурсивно идем вглубь структуры данных
     if isinstance(data, dict):
         for key, value in data.items():
             find_list_by_fingerprint(value, f"{path}['{key}']")
@@ -41,7 +36,6 @@ def find_list_by_fingerprint(data, path=""):
             find_list_by_fingerprint(item, f"{path}[{i}]")
 
 
-# --- Основная часть ---
 print(f"Запускаю разведку на странице: {URL}")
 try:
     response = requests.get(URL, headers=HEADERS)

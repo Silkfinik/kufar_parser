@@ -1,4 +1,3 @@
-# field_selector_win.py
 import customtkinter as ctk
 import json
 from sub_field_selector_win import SubFieldSelectorWindow
@@ -18,7 +17,7 @@ class FieldSelectorWindow(ctk.CTkToplevel):
         self.max_pages = max_pages
         self.widgets = []
         self.unpacked_fields_config = {}
-        self.last_clicked_key = None  # <-- Добавляем этот атрибут
+        self.last_clicked_key = None
 
         self.scrollable_frame = ctk.CTkScrollableFrame(
             self, label_text="Поле -> Имя столбца")
@@ -56,7 +55,6 @@ class FieldSelectorWindow(ctk.CTkToplevel):
             self.widgets.append(
                 {'checkbox': checkbox, 'entry': entry, 'original_name': key})
 
-        # ... (остальная часть __init__ и другие функции до open_sub_field_selector без изменений)
         self.preview_textbox = ctk.CTkTextbox(self, height=150)
         self.preview_textbox.grid(
             row=1, column=0, columnspan=2, padx=10, pady=10, sticky="ew")
@@ -81,7 +79,7 @@ class FieldSelectorWindow(ctk.CTkToplevel):
             self.bind_mouse_scroll(child)
 
     def open_sub_field_selector(self, key, value):
-        self.last_clicked_key = key  # Запоминаем ключ, по которому кликнули
+        self.last_clicked_key = key
         previous_config = self.unpacked_fields_config.get(
             key, {}).get('sub_field_map', {})
 
@@ -103,15 +101,14 @@ class FieldSelectorWindow(ctk.CTkToplevel):
             self.unpacked_fields_config[key] = {
                 "type": unpack_type,
                 "sub_field_map": sub_window.result_config,
-                "source_key": "pl",  # Для list_of_dicts
-                "value_key": "v"    # Для list_of_dicts
+                "source_key": "pl",
+                "value_key": "v"
             }
             self.show_preview(key, {"Распаковано полей": list(
                 sub_window.result_config.values())})
             self.parent_app.log_status(
                 f"⚙️ Для поля '{key}' настроена распаковка {len(sub_window.result_config)} вложенных полей.")
 
-    # ... (остальные функции без изменений) ...
     def on_mouse_wheel(self, event):
         if event.num == 4:
             self.scrollable_frame._parent_canvas.yview_scroll(-1, "units")
