@@ -8,9 +8,33 @@ HEADERS = {
 }
 
 
+def build_translation_maps(filters_data):
+    """
+    Создает мастер-словари для перевода ID в текст.
+    Пример: {'amenities': {'1': 'Мебель', '2': 'Холодильник'}, 'type': {'sell': 'Покупка'}}
+    """
+    master_map = {}
+    for filter_item in filters_data:
+        technical_name = filter_item.get('name')
+        values = filter_item.get('values')
+        if not technical_name or not values:
+            continue
+
+        translation_map = {}
+        for option in values:
+            option_id = option.get('value')
+            # Используем .get() для безопасного доступа к вложенному словарю
+            option_label = option.get('labels', {}).get('ru')
+            if option_id is not None and option_label is not None:
+                translation_map[str(option_id)] = option_label
+
+        master_map[technical_name] = translation_map
+    return master_map
+
+
 def get_page_data(url):
     """
-    Функция для получения всех данных (объявления, пагинация, общее кол-во) с одной страницы.
+    Функция для получения всех данных, включая динамически созданные словари-переводчики.
     """
     try:
         response = requests.get(url, headers=HEADERS)
@@ -25,23 +49,31 @@ def get_page_data(url):
 
     try:
         data = json.loads(script_tag.string)
-        listing_data = data['props']['initialState']['listing']
 
+        # Извлекаем все необходимые нам части данных
+        listing_data = data['props']['initialState']['listing']
+        # Используем .get() для безопасного извлечения, на случай если структура изменится
+        filters_data = data['props']['initialState'].get(
+            'filters', {}).get('pageFilters', [])
+
+        # Собираем данные об объявлениях
         regular_ads = listing_data.get('ads', [])
         vip_ads = listing_data.get('vip', [])
         all_apartments = vip_ads + regular_ads
 
+        # Ищем токен для пагинации
         pagination_list = listing_data.get('pagination', [])
-        next_page_token = None
-        for page_info in pagination_list:
-            if page_info.get('label') == 'next':
-                next_page_token = page_info.get('token')
-                break
+        next_page_token = next(
+            (p.get('token') for p in pagination_list if p.get('label') == 'next'), None)
+
+        # НОВИНКА: Создаем словари-переводчики
+        translation_maps = build_translation_maps(filters_data)
 
         return {
             "apartments": all_apartments,
             "next_page_token": next_page_token,
-            "total_ads": int(listing_data.get('total', 0))
+            "total_ads": int(listing_data.get('total', 0)),
+            "translation_maps": translation_maps  # <-- Передаем словари дальше
         }
     except (KeyError, json.JSONDecodeError) as e:
         return {"error": f"Ошибка обработки структуры данных: {e}"}
