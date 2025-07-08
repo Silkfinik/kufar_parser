@@ -1,5 +1,3 @@
-# find_dictionaries.py (temporary script)
-
 import requests
 import json
 from bs4 import BeautifulSoup

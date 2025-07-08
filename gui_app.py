@@ -1,10 +1,10 @@
-# gui_app.py
 import customtkinter as ctk
-import threading  # <-- Убедимся, что threading импортирован
+import threading
 import time
 import math
 import csv
 import json
+import os
 from scraper import get_page_data
 from field_selector_win import FieldSelectorWindow
 
@@ -166,10 +166,10 @@ class App(ctk.CTk):
         self.cancel_event.clear()
 
         self.base_url = self.url_entry.get()
-        if not self.base_url.startswith("https://kufar.by/"):
-            self.log_status(
-                "❌ ОШИБКА: Пожалуйста, вставьте корректную ссылку с kufar.by")
-            return
+        # if not self.base_url.startswith("https://kufar.by/"):
+        #     self.log_status(
+        #         "❌ ОШИБКА: Пожалуйста, вставьте корректную ссылку с kufar.by")
+        #     return
 
         self.set_ui_state(is_running=True)
         self.log_status("🚀 Запуск... Анализирую первую страницу...")
@@ -288,16 +288,28 @@ class App(ctk.CTk):
         if not processed_data:
             self.log_status("⚠️ Нет данных для сохранения.")
             return
-        full_filename = f"{filename}.{file_format}"
-        self.log_status(f"💾 Сохраняю данные в {full_filename}...")
+
+        output_dir = "data"
+        os.makedirs(output_dir, exist_ok=True)
+
+        full_filename_with_ext = f"{filename}.{file_format}"
+        full_path = os.path.join(output_dir, full_filename_with_ext)
+
+        self.log_status(f"💾 Сохраняю данные в файл {full_path}...")
+
         try:
             if file_format == "csv":
-                with open(full_filename, 'w', newline='', encoding='utf-8') as f:
+                with open(full_path, 'w', newline='', encoding='utf-8') as f:
                     writer = csv.DictWriter(f, fieldnames=headers)
                     writer.writeheader()
+                    for row in processed_data:
+                        for key, value in row.items():
+                            if isinstance(value, (dict, list)):
+                                row[key] = json.dumps(
+                                    value, ensure_ascii=False)
                     writer.writerows(processed_data)
             elif file_format == "json":
-                with open(full_filename, 'w', encoding='utf-8') as f:
+                with open(full_path, 'w', encoding='utf-8') as f:
                     json.dump(processed_data, f, ensure_ascii=False, indent=4)
             self.log_status(f"✅ Файл успешно сохранен!")
         except Exception as e:
