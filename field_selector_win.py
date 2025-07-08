@@ -1,83 +1,116 @@
 # field_selector_win.py
 import customtkinter as ctk
 import json
-from sub_field_selector_win import SubFieldSelectorWindow  # <-- НОВЫЙ ИМПОРТ
+from sub_field_selector_win import SubFieldSelectorWindow
 
 
 class FieldSelectorWindow(ctk.CTkToplevel):
-    def __init__(self, parent, sample_ad_data):
+    def __init__(self, parent, sample_ad_data, max_pages):  # Теперь принимаем max_pages
         super().__init__(parent)
+        self.parent_app = parent
         self.transient(parent)
-        self.title("Выбор полей для экспорта")
-        self.geometry("600x700")
-        self.grid_columnconfigure(0, weight=1)
+        self.title("Выбор и настройка полей для экспорта")
+        self.geometry("700x750")  # Немного увеличим высоту
+        self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
 
         self.sample_ad_data = sample_ad_data
-        self.checkboxes = {}
-        self.unpacked_fields_config = {}  # <-- ЗДЕСЬ ХРАНИМ ВЫБОР ВЛОЖЕННЫХ ПОЛЕЙ
-        self.selection_result = None
+        self.max_pages = max_pages  # Сохраняем максимальное количество страниц
+        self.widgets = []
+        self.unpacked_fields_config = {}
 
+        # --- Фрейм выбора полей ---
         scrollable_frame = ctk.CTkScrollableFrame(
-            self, label_text="Выберите поля или распакуйте сложные")
-        scrollable_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
-        scrollable_frame.grid_columnconfigure(0, weight=1)
-
+            self, label_text="Поле -> Имя столбца")
+        scrollable_frame.grid(row=0, column=0, columnspan=2,
+                              padx=10, pady=10, sticky="nsew")
+        scrollable_frame.grid_columnconfigure(1, weight=1)
+        # ... (код для создания чекбоксов и кнопок остается тот же)
         for i, (key, value) in enumerate(sample_ad_data.items()):
-            checkbox = ctk.CTkCheckBox(scrollable_frame, text=key)
-            checkbox.grid(row=i, column=0, padx=10, pady=5, sticky="w")
+            checkbox = ctk.CTkCheckBox(scrollable_frame, text=key, width=200)
+            checkbox.grid(row=i, column=0, padx=10, pady=8, sticky="w")
             checkbox.select()
-            self.checkboxes[key] = checkbox
-
-            # --- ОБНОВЛЕННАЯ ЛОГИКА: ДОБАВЛЯЕМ КНОПКУ "РАСПАКОВАТЬ" ---
+            entry = ctk.CTkEntry(scrollable_frame)
+            entry.grid(row=i, column=1, padx=5, pady=8, sticky="ew")
+            entry.insert(0, key)
+            button_frame = ctk.CTkFrame(
+                scrollable_frame, fg_color="transparent")
+            button_frame.grid(row=i, column=2, padx=5, pady=8, sticky="e")
             is_unpackable = isinstance(value, list) and len(
                 value) > 0 and isinstance(value[0], dict) and 'pl' in value[0]
-
             if is_unpackable:
-                unpack_button = ctk.CTkButton(scrollable_frame, text="Распаковать...", width=120,
+                unpack_button = ctk.CTkButton(button_frame, text="Распаковать...", width=100,
                                               command=lambda k=key, v=value: self.open_sub_field_selector(k, v))
-                unpack_button.grid(row=i, column=1, padx=5, pady=5, sticky="e")
-            else:
-                preview_button = ctk.CTkButton(scrollable_frame, text="Предпросмотр", width=120,
-                                               command=lambda k=key, v=value: self.show_preview(k, v))
-                preview_button.grid(
-                    row=i, column=1, padx=5, pady=5, sticky="e")
+                unpack_button.pack(side="left")
+            preview_button = ctk.CTkButton(
+                button_frame, text="...", width=40, command=lambda k=key, v=value: self.show_preview(k, v))
+            preview_button.pack(side="left", padx=(5, 0))
+            self.widgets.append(
+                {'checkbox': checkbox, 'entry': entry, 'original_name': key})
 
-        self.preview_textbox = ctk.CTkTextbox(
-            self, height=150, font=("Courier New", 12))
+        # --- Панель предпросмотра ---
+        self.preview_textbox = ctk.CTkTextbox(self, height=150)
         self.preview_textbox.grid(
-            row=1, column=0, padx=10, pady=10, sticky="ew")
+            row=1, column=0, columnspan=2, padx=10, pady=10, sticky="ew")
         self.preview_textbox.insert(
-            "0.0", "Нажмите 'Предпросмотр' или 'Распаковать'...")
+            "0.0", "Нажмите '...' или 'Распаковать'...")
         self.preview_textbox.configure(state="disabled")
 
+        # --- НОВЫЙ ФРЕЙМ ДЛЯ ВВОДА КОЛИЧЕСТВА СТРАНИЦ ---
+        pages_frame = ctk.CTkFrame(self)
+        pages_frame.grid(row=2, column=0, columnspan=2,
+                         padx=10, pady=5, sticky="ew")
+        pages_label = ctk.CTkLabel(
+            pages_frame, text=f"Найдено страниц: {self.max_pages}. Сколько обработать?")
+        pages_label.pack(side="left", padx=15, pady=10)
+        self.pages_entry = ctk.CTkEntry(pages_frame, width=80)
+        self.pages_entry.pack(side="left", padx=15, pady=10)
+        self.pages_entry.insert(0, str(self.max_pages))
+
+        # --- Кнопка подтверждения ---
         confirm_button = ctk.CTkButton(
-            self, text="Подтвердить выбор и продолжить", command=self.confirm_selection, height=35)
-        confirm_button.grid(row=2, column=0, padx=10, pady=10, sticky="ew")
+            self, text="Подтвердить и запустить парсинг", command=self.confirm_selection, height=40)
+        confirm_button.grid(row=3, column=0, columnspan=2,
+                            padx=10, pady=10, sticky="ew")
 
+    def confirm_selection(self):
+        # 1. Собираем конфигурацию полей
+        field_config = {
+            "field_map": {w['original_name']: w['entry'].get() for w in self.widgets if w['checkbox'].get() == 1 and w['entry'].get()},
+            "unpacked_fields": self.unpacked_fields_config
+        }
+
+        # 2. Получаем количество страниц
+        try:
+            pages_to_scrape = min(self.max_pages, int(self.pages_entry.get()))
+            if pages_to_scrape <= 0:
+                pages_to_scrape = 1
+        except (ValueError, TypeError):
+            pages_to_scrape = self.max_pages
+
+        # 3. Передаем ОБЩИЙ результат родителю
+        self.parent_app.dialog_result = {
+            "selection_config": field_config,
+            "pages_to_scrape": pages_to_scrape
+        }
+        self.destroy()
+
+    # ... (остальные функции open_sub_field_selector и show_preview без изменений) ...
     def open_sub_field_selector(self, key, value):
-        """Открывает окно выбора вложенных полей."""
-        # Собираем имена всех вложенных полей. 'pl' - это их имя (parameter label)
-        sub_field_names = [item.get('pl') for item in value if item.get('pl')]
-
-        # Получаем предыдущий выбор для этого ключа, если он был
-        previous_selection = self.unpacked_fields_config.get(
-            key, {}).get('selected_sub_fields', [])
-
-        sub_window = SubFieldSelectorWindow(
-            self, sub_field_names, previous_selection)
-        self.wait_window(sub_window)  # Ждем, пока пользователь сделает выбор
-
-        # Сохраняем выбор пользователя
-        if hasattr(sub_window, 'selected_sub_fields'):
+        previous_config = self.unpacked_fields_config.get(
+            key, {}).get('sub_field_map', {})
+        sub_window = SubFieldSelectorWindow(self, value, previous_config)
+        self.wait_window(sub_window)
+        if hasattr(sub_window, 'result_config') and sub_window.result_config:
             self.unpacked_fields_config[key] = {
-                "selected_sub_fields": sub_window.selected_sub_fields,
-                "source_key": "pl",  # ключ, где лежит имя параметра
-                "value_key": "vl"   # ключ, где лежит значение параметра
+                "sub_field_map": sub_window.result_config,
+                "source_key": "pl",
+                "value_key": "v"
             }
-            self.show_preview(key, self.unpacked_fields_config[key])
+            self.show_preview(key, {"Распаковано полей": list(
+                sub_window.result_config.values())})
             self.master.log_status(
-                f"⚙️ Для поля '{key}' настроена распаковка {len(sub_window.selected_sub_fields)} вложенных полей.")
+                f"⚙️ Для поля '{key}' настроена распаковка {len(sub_window.result_config)} вложенных полей.")
 
     def show_preview(self, key, value):
         self.preview_textbox.configure(state="normal")
@@ -89,15 +122,3 @@ class FieldSelectorWindow(ctk.CTkToplevel):
             preview_text += str(value)
         self.preview_textbox.insert("0.0", preview_text)
         self.preview_textbox.configure(state="disabled")
-
-    def confirm_selection(self):
-        # Собираем базовые поля
-        selected_top_level_fields = [
-            key for key, checkbox in self.checkboxes.items() if checkbox.get() == 1]
-
-        # Сохраняем итоговый результат
-        self.selection_result = {
-            "top_level_fields": selected_top_level_fields,
-            "unpacked_fields": self.unpacked_fields_config
-        }
-        self.destroy()

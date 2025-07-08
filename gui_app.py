@@ -1,5 +1,5 @@
 # gui_app.py
-
+# ... (импорты и функция process_and_flatten_data без изменений) ...
 import customtkinter as ctk
 import threading
 import time
@@ -7,55 +7,49 @@ import math
 import csv
 import json
 from scraper import get_page_data
-# --- НОВЫЙ ИМПОРТ ---
 from field_selector_win import FieldSelectorWindow
 
-# --- ВАЖНО: НОВАЯ ФУНКЦИЯ ДЛЯ ОБРАБОТКИ ДАННЫХ ---
 
-
-def flatten_apartment_data(apartment_list, selection_config):
-    """
-    Преобразует список объявлений в плоскую структуру согласно конфигурации выбора полей.
-    """
+def process_and_flatten_data(apartment_list, selection_config, empty_symbol):
     if not selection_config:
-        return apartment_list
-
+        return apartment_list, []
     processed_list = []
-
-    top_level_fields = selection_config.get("top_level_fields", [])
+    field_map = selection_config.get("field_map", {})
     unpack_config = selection_config.get("unpacked_fields", {})
-
+    final_headers = []
+    for original_name, custom_name in field_map.items():
+        if original_name not in unpack_config:
+            final_headers.append(custom_name)
+    for config in unpack_config.values():
+        final_headers.extend(config['sub_field_map'].values())
     for ad in apartment_list:
-        # 1. Собираем поля верхнего уровня
-        flat_ad = {key: ad.get(key) for key in top_level_fields}
-
-        # 2. Распаковываем сложные поля
+        flat_ad = {}
+        for original_name, custom_name in field_map.items():
+            if original_name not in unpack_config:
+                value = ad.get(original_name, empty_symbol)
+                flat_ad[custom_name] = value if value not in [
+                    None, ""] else empty_symbol
         for field_to_unpack, config in unpack_config.items():
-            if field_to_unpack in ad:
-                # Создаем временный словарь для быстрого доступа: {'Имя параметра': 'Значение'}
-                param_lookup = {str(item.get(config["source_key"])): item.get(config["value_key"])
-                                for item in ad[field_to_unpack] if config["source_key"] in item}
-
-                # Добавляем выбранные вложенные поля в нашу плоскую структуру
-                for sub_field in config["selected_sub_fields"]:
-                    flat_ad[sub_field] = param_lookup.get(sub_field)
-
+            param_lookup = {}
+            if field_to_unpack in ad and ad[field_to_unpack]:
+                source_key = config["source_key"]
+                value_key = config["value_key"]
+                param_lookup = {str(item.get(source_key)): item.get(
+                    value_key) for item in ad[field_to_unpack] if source_key in item}
+            for original_sub_name, custom_sub_name in config['sub_field_map'].items():
+                value = param_lookup.get(original_sub_name, empty_symbol)
+                flat_ad[custom_sub_name] = value if value not in [
+                    None, ""] else empty_symbol
         processed_list.append(flat_ad)
-
-    return processed_list
-
-# --- Основной класс приложения ---
+    return processed_list, final_headers
 
 
 class App(ctk.CTk):
-    # ... (весь код до prompt_user_for_next_steps без изменений)
     def __init__(self):
         super().__init__()
-        # ... (вся ваша предыдущая настройка виджетов)
         self.title("Kufar Scraper ⚡")
-        self.geometry("700x650")
-        ctk.set_appearance_mode("dark")
-        ctk.set_default_color_theme("blue")
+        self.geometry("700x550")  # Вернули высоту обратно
+        # ... (код фрейма для ссылки)
         self.grid_columnconfigure(0, weight=1)
         self.url_frame = ctk.CTkFrame(self)
         self.url_frame.grid(row=0, column=0, padx=10, pady=10, sticky="ew")
@@ -67,31 +61,37 @@ class App(ctk.CTk):
             self.url_frame, placeholder_text="https://re.kufar.by/l/minsk/snyat/kvartiru?price=r:100,500", height=35)
         self.url_entry.grid(row=1, column=0, padx=15,
                             pady=(5, 15), sticky="ew")
+
+        # --- УПРОЩЕННЫЙ ФРЕЙМ НАСТРОЕК ---
         self.settings_frame = ctk.CTkFrame(self)
         self.settings_frame.grid(
             row=1, column=0, padx=10, pady=10, sticky="ew")
-        self.settings_frame.grid_columnconfigure(0, weight=1)
-        self.settings_frame.grid_columnconfigure(1, weight=1)
-        self.ask_pages_switch = ctk.CTkSwitch(
-            self.settings_frame, text="Спрашивать кол-во страниц", font=("Arial", 12), onvalue=True, offvalue=False)
-        self.ask_pages_switch.grid(
-            row=0, column=0, padx=15, pady=15, sticky="w")
-        self.ask_pages_switch.select()
+        self.settings_frame.grid_columnconfigure((0, 1), weight=1)
+
         self.delay_label = ctk.CTkLabel(
-            self.settings_frame, text="Задержка (сек):", font=("Arial", 12))
-        self.delay_label.grid(row=0, column=1, padx=(
-            100, 5), pady=15, sticky="w")
+            self.settings_frame, text="Задержка (сек):")
+        self.delay_label.grid(row=0, column=0, padx=15, pady=15, sticky="w")
         self.delay_entry = ctk.CTkEntry(self.settings_frame, width=60)
-        self.delay_entry.grid(row=0, column=1, padx=(
-            200, 15), pady=15, sticky="w")
+        self.delay_entry.grid(row=0, column=0, padx=(
+            115, 0), pady=15, sticky="w")
         self.delay_entry.insert(0, "1")
+
+        self.empty_label = ctk.CTkLabel(
+            self.settings_frame, text="Заполнитель пустых полей:")
+        self.empty_label.grid(row=0, column=1, padx=15, pady=15, sticky="w")
+        self.empty_entry = ctk.CTkEntry(self.settings_frame, width=60)
+        self.empty_entry.grid(row=0, column=1, padx=(
+            190, 0), pady=15, sticky="w")
+        self.empty_entry.insert(0, "N/A")
+
+        # ... (остальные виджеты без изменений)
         self.format_segmented_button = ctk.CTkSegmentedButton(
             self, values=["CSV", "JSON"], height=35)
         self.format_segmented_button.set("CSV")
         self.format_segmented_button.grid(
             row=2, column=0, padx=20, pady=10, sticky="w")
-        self.start_button = ctk.CTkButton(
-            self, text="Начать анализ", command=self.start_initial_fetch, height=40, font=("Arial", 16, "bold"))
+        self.start_button = ctk.CTkButton(self, text="Начать анализ и настройку",
+                                          command=self.start_initial_fetch, height=40, font=("Arial", 16, "bold"))
         self.start_button.grid(row=3, column=0, padx=10, pady=10, sticky="ew")
         self.progress_bar = ctk.CTkProgressBar(self, mode="indeterminate")
         self.status_textbox = ctk.CTkTextbox(
@@ -102,6 +102,7 @@ class App(ctk.CTk):
         self.first_page_data = None
         self.base_url = ""
 
+    # ... (log_status, set_ui_state, start_initial_fetch, initial_fetch_worker без изменений) ...
     def log_status(self, message):
         def _log():
             self.status_textbox.configure(state="normal")
@@ -112,11 +113,11 @@ class App(ctk.CTk):
 
     def set_ui_state(self, is_running):
         state = "disabled" if is_running else "normal"
-        button_text = "В процессе..." if is_running else "Начать анализ"
+        button_text = "В процессе..." if is_running else "Начать анализ и настройку"
         self.start_button.configure(state=state, text=button_text)
         self.url_entry.configure(state=state)
-        self.ask_pages_switch.configure(state=state)
         self.delay_entry.configure(state=state)
+        self.empty_entry.configure(state=state)
         self.format_segmented_button.configure(state=state)
         if is_running:
             self.progress_bar.grid(
@@ -154,36 +155,31 @@ class App(ctk.CTk):
         self.max_pages = math.ceil(total_ads / ads_on_page)
         self.log_status(
             f"📊 Анализ завершен. Всего найдено {total_ads} объявлений (~{self.max_pages} страниц).")
-        self.after(0, self.prompt_user_for_next_steps)
+        # --- СРАЗУ ВЫЗЫВАЕМ ОКНО НАСТРОЙКИ ---
+        self.after(0, self.prompt_user_for_all_settings)
 
-    def prompt_user_for_next_steps(self):
+    def prompt_user_for_all_settings(self):
+        """
+        Показывает ЕДИНОЕ окно для всех настроек, затем запускает парсер.
+        """
+        self.dialog_result = None
         sample_ad = self.first_page_data['apartments'][0]
-        selector_window = FieldSelectorWindow(self, sample_ad)
+
+        # Передаем в окно максимальное кол-во страниц
+        selector_window = FieldSelectorWindow(self, sample_ad, self.max_pages)
         self.wait_window(selector_window)
 
-        selection_config = selector_window.selection_result
-        if selection_config is None:
-            self.log_status("🛑 Операция отменена. Выбор полей не сделан.")
+        full_config = self.dialog_result
+        if full_config is None:
+            self.log_status("🛑 Операция отменена на этапе настройки.")
             self.set_ui_state(is_running=False)
             return
 
-        # ... (остальная часть функции с диалогом о страницах без изменений)
-        pages_to_scrape = self.max_pages
-        if self.ask_pages_switch.get() is True:
-            dialog = ctk.CTkInputDialog(
-                text=f"Найдено {self.max_pages} страниц.\nСколько страниц обработать?", title="Выбор количества страниц")
-            user_input = dialog.get_input()
-            if user_input is None:
-                self.log_status("🛑 Операция отменена пользователем.")
-                self.set_ui_state(is_running=False)
-                return
-            try:
-                pages_to_scrape = min(self.max_pages, int(user_input))
-            except (ValueError, TypeError):
-                self.log_status(
-                    f"⚠️ Ввод не распознан. Будут обработаны все {self.max_pages} страниц.")
+        selection_config = full_config["selection_config"]
+        pages_to_scrape = full_config["pages_to_scrape"]
 
-        self.log_status(f"⚙️ Принято к обработке: {pages_to_scrape} страниц.")
+        self.log_status(
+            f"✅ Настройки сохранены. Будет обработано: {pages_to_scrape} страниц.")
 
         main_thread = threading.Thread(
             target=self.main_scraping_worker, args=(pages_to_scrape, selection_config))
@@ -217,51 +213,45 @@ class App(ctk.CTk):
                     f"✅ Найдено {len(page_data['apartments'])} объявлений. Всего собрано: {len(all_found_apartments)}")
                 next_token = page_data.get('next_page_token')
 
-        # --- ОБРАБАТЫВАЕМ И СОХРАНЯЕМ ---
         self.log_status(
             f"\n🎉 Сбор завершен! Всего найдено {len(all_found_apartments)} объявлений.")
         self.log_status(
-            "Обрабатываю и 'расплющиваю' данные перед сохранением...")
+            "Обрабатываю и 'расплющиваю' данные согласно настройкам...")
 
-        flat_data = flatten_apartment_data(
-            all_found_apartments, selection_config)
+        empty_symbol = self.empty_entry.get()
+        processed_data, final_headers = process_and_flatten_data(
+            all_found_apartments, selection_config, empty_symbol)
 
         file_format = self.format_segmented_button.get().lower()
         filename = f"kufar_ads_{int(time.time())}"
-        self.save_results(flat_data, file_format, filename)
+        self.save_results(processed_data, final_headers, file_format, filename)
         self.set_ui_state(is_running=False)
 
-    def save_results(self, flat_apartments, file_format, filename):
-        # --- Функция сохранения теперь работает с плоскими данными ---
-        if not flat_apartments:
+    def save_results(self, processed_data, headers, file_format, filename):
+        # ... (функция save_results без изменений)
+        if not processed_data:
             return
         full_filename = f"{filename}.{file_format}"
         self.log_status(f"💾 Сохраняю данные в {full_filename}...")
-
         try:
-            # Заголовки теперь всегда правильные
-            headers = flat_apartments[0].keys()
             if file_format == "csv":
-                # Данные уже плоские, но могут содержать списки/словари (например, в 'vl' метро)
-                processed_for_csv = []
-                for ad in flat_apartments:
-                    processed_ad = {k: json.dumps(v, ensure_ascii=False) if isinstance(
-                        v, (dict, list)) else v for k, v in ad.items()}
-                    processed_for_csv.append(processed_ad)
-
                 with open(full_filename, 'w', newline='', encoding='utf-8') as f:
                     writer = csv.DictWriter(f, fieldnames=headers)
                     writer.writeheader()
-                    writer.writerows(processed_for_csv)
+                    for row in processed_data:
+                        for key, value in row.items():
+                            if isinstance(value, (dict, list)):
+                                row[key] = json.dumps(
+                                    value, ensure_ascii=False)
+                    writer.writerows(processed_data)
             elif file_format == "json":
                 with open(full_filename, 'w', encoding='utf-8') as f:
-                    json.dump(flat_apartments, f, ensure_ascii=False, indent=4)
+                    json.dump(processed_data, f, ensure_ascii=False, indent=4)
             self.log_status(f"✅ Файл успешно сохранен!")
         except Exception as e:
             self.log_status(f"❌ Ошибка сохранения: {e}")
 
 
-# --- Запуск приложения ---
 if __name__ == "__main__":
     app = App()
     app.mainloop()
